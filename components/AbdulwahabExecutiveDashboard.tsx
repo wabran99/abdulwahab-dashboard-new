@@ -139,6 +139,7 @@ async function fetchGoogleSheet(sheetId: string, sheetName: string) {
   const response = await fetch(url, { cache: 'no-store' });
   const text = await response.text();
   const match = text.match(/google\.visualization\.Query\.setResponse\(([\s\S]*)\);?$/);
+  
 
   if (!match) {
     throw new Error('Unable to parse Google Sheets response. Ensure the sheet is public as Viewer.');
