@@ -70,25 +70,23 @@ export async function GET() {
     for (const row of rows) {
       const c = row.c || [];
 
-      const region = toText(c[0]);        // A
-      const shopCode = toText(c[1]);      // B
-      const name = toText(c[2]);          // C
-      const userName = toText(c[3]);      // D
-      const totalTarget = toNumber(c[4]); // E
-      const achieved = toNumber(c[10]);   // K
-      const postpaid = toNumber(c[15]);   // P
-      const prepaid = toNumber(c[17]);    // R
+      const region = toText(c[0]);
+      const shopCode = toText(c[1]);
+      const name = toText(c[2]);
+      const userName = toText(c[3]);
+      const totalTarget = toNumber(c[4]);
+      const achieved = toNumber(c[10]);
+      const postpaid = toNumber(c[15]);
+      const prepaid = toNumber(c[17]);
 
       const lowerName = name.toLowerCase();
 
       const isBranchHeader =
         !!name &&
         !userName &&
-        (
-          lowerName.includes("fbo") ||
+        (lowerName.includes("fbo") ||
           lowerName.includes("road") ||
-          lowerName.includes("mall")
-        );
+          lowerName.includes("mall"));
 
       if (isBranchHeader) {
         currentBranch = name;
@@ -147,8 +145,6 @@ export async function GET() {
       existing.achieved += emp.achieved;
       existing.prep += emp.prep;
       existing.post += emp.post;
-      existing.fiveG += emp.fiveG;
-      existing.fiber += emp.fiber;
 
       branchMap.set(emp.branch, existing);
     }
@@ -199,9 +195,12 @@ export async function GET() {
       employees: rankedEmployees,
       totals: {
         ...totals,
-        achievementPct: totals.target > 0 ? (totals.achieved / totals.target) * 100 : 0,
-        prepPct: totals.achieved > 0 ? (totals.prep / totals.achieved) * 100 : 0,
-        postPct: totals.achieved > 0 ? (totals.post / totals.achieved) * 100 : 0,
+        achievementPct:
+          totals.target > 0 ? (totals.achieved / totals.target) * 100 : 0,
+        prepPct:
+          totals.achieved > 0 ? (totals.prep / totals.achieved) * 100 : 0,
+        postPct:
+          totals.achieved > 0 ? (totals.post / totals.achieved) * 100 : 0,
       },
       topEmployee: rankedEmployees[0] || null,
     });
