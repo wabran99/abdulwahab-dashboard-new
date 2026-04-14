@@ -19,46 +19,9 @@ import html2canvas from "html2canvas";
 import jsPDF from "jspdf";
 
 const CONFIG = {
-  sheetId: "1EwSWZ9XsyRY_HBNq9elmEsN35wbvGZZ12Rn_7FJGD8o",
-  sheetName: "Adulwahab M Alshammari",
   refreshMs: 60_000,
   title: "Abdulwahab Team Executive Dashboard",
   subtitle: "Live performance view powered by Google Sheets",
-};
-
-type SheetColumn = {
-  id?: string;
-  label?: string;
-};
-
-type SheetCell = {
-  v?: string | number | null;
-  f?: string | null;
-};
-
-type SheetRow = {
-  c?: Array<SheetCell | null>;
-};
-
-type RawSheetData = {
-  columns: SheetColumn[];
-  rows: Record<string, string>[];
-};
-
-type DashboardRow = {
-  raw: Record<string, string>;
-  branch: string;
-  employee: string;
-  target: number;
-  achieved: number;
-  prep: number;
-  post: number;
-  achievementPct: number;
-  prepPct: number;
-  postPct: number;
-  rank: number;
-  fiveG: number;
-  fiber: number;
 };
 
 type BranchSummary = {
@@ -74,12 +37,22 @@ type BranchSummary = {
   postPct: number;
 };
 
-type EmployeeRow = DashboardRow & {
+type EmployeeRow = {
+  employee: string;
+  branch: string;
+  target: number;
+  achieved: number;
+  prep: number;
+  post: number;
+  achievementPct: number;
+  prepPct: number;
+  postPct: number;
+  fiveG: number;
+  fiber: number;
   uiRank: number;
 };
 
 type DashboardData = {
-  headers: string[];
   branches: BranchSummary[];
   employees: EmployeeRow[];
   totals: {
@@ -96,270 +69,35 @@ type DashboardData = {
   topEmployee: EmployeeRow | null;
 };
 
-function cleanText(value: unknown) {
-  return String(value ?? "").replace(/\s+/g, " ").trim();
-}
-
 function toNumber(value: unknown) {
-  if (typeof value === "number") return value;
-  if (value == null) return 0;
-
-  const raw = String(value)
-    .replace(/٬/g, "")
-    .replace(/,/g, "")
-    .replace(/٫/g, ".")
-    .replace(/%/g, "")
-    .trim();
-
-  const parsed = Number(raw);
-  return Number.isFinite(parsed) ? parsed : 0;
-}
-
-function pct(value: unknown, fallback = 0) {
-  const n = toNumber(value);
-  return Number.isFinite(n) ? n : fallback;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : 0;
 }
 
 function formatNumber(value: unknown) {
-  return new Intl.NumberFormat("en-US", {
-    maximumFractionDigits: 0,
-  }).format(toNumber(value));
+  return new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 }).format(
+    toNumber(value)
+  );
 }
 
 function formatPct(value: unknown) {
-  return `${pct(value).toFixed(1)}%`;
+  return `${toNumber(value).toFixed(1)}%`;
 }
 
-function getCellValue(cell: SheetCell | null | undefined) {
-  if (!cell) return "";
-  if (cell.f != null) return String(cell.f);
-  if (cell.v != null) return String(cell.v);
-  return "";
-}
-
-function buildRowObject(columns: SheetColumn[], row: SheetRow) {
-  const values = row.c || [];
-  const obj: Record<string, string> = {};
-
-  columns.forEach((col, index) => {
-    const key = cleanText(col.label || col.id || `column_${index + 1}`);
-    obj[key] = getCellValue(values[index]);
-  });
-
-  return obj;
-}
-
-async function fetchGoogleSheet(
-  _sheetId: string,
-  _sheetName: string
-): Promise<RawSheetData> {
+async function fetchDashboardData(): Promise<DashboardData> {
   const response = await fetch("/api/sheet", { cache: "no-store" });
 
   if (!response.ok) {
-    throw new Error("Failed to fetch data from API");
+    throw new Error("Failed to fetch dashboard data");
   }
 
   const json = await response.json();
 
-  if (!json?.table) {
-    throw new Error("Invalid data format from Google Sheets");
+  if (json?.error) {
+    throw new Error(json.error);
   }
 
-  const table = json.table;
-  const columns: SheetColumn[] = table.cols || [];
-  const rows: Record<string, string>[] = (table.rows || []).map(
-    (row: SheetRow) => buildRowObject(columns, row)
-  );
-
-  return { columns, rows };
-}
-
-function transformData(raw: RawSheetData): DashboardData {
-  const { columns, rows } = raw;
-  const headers = columns.map((c) => cleanText(c.label || c.id || ""));
-
-  let currentBranch = "";
-
-  const normalizedRows: DashboardRow[] = rows
-    .map((row) => {
-      const values = headers.map((header) => cleanText(row[header]));
-
-      const region = cleanText(values[0]);      // A
-      const shopCode = cleanText(values[1]);    // B
-      const name = cleanText(values[2]);        // C
-      const userName = cleanText(values[3]);    // D
-      const totalTarget = toNumber(values[4]);  // E
-      const achieved = toNumber(values[10]);    // K
-      const postpaid = toNumber(values[15]);    // P
-      const prepaid = toNumber(values[17]);     // R
-
-      const lowerName = name.toLowerCase();
-
-      const isBranchHeader =
-        !!name &&
-        !userName &&
-        (
-          lowerName.includes("fbo") ||
-          lowerName.includes("road") ||
-          lowerName.includes("mall")
-        );
-
-      if (isBranchHeader) {
-        currentBranch = name;
-        return {
-          raw: row,
-          branch: "",
-          employee: "",
-          target: 0,
-          achieved: 0,
-          prep: 0,
-          post: 0,
-          achievementPct: 0,
-          prepPct: 0,
-          postPct: 0,
-          rank: 0,
-          fiveG: 0,
-          fiber: 0,
-        };
-      }
-
-      const isEmployeeRow = !!name && !!userName;
-
-      if (!isEmployeeRow) {
-        return {
-          raw: row,
-          branch: "",
-          employee: "",
-          target: 0,
-          achieved: 0,
-          prep: 0,
-          post: 0,
-          achievementPct: 0,
-          prepPct: 0,
-          postPct: 0,
-          rank: 0,
-          fiveG: 0,
-          fiber: 0,
-        };
-      }
-
-      const achievementPct =
-        totalTarget > 0 ? (achieved / totalTarget) * 100 : 0;
-      const prepPct = achieved > 0 ? (prepaid / achieved) * 100 : 0;
-      const postPct = achieved > 0 ? (postpaid / achieved) * 100 : 0;
-
-      return {
-        raw: row,
-        branch: currentBranch || "Unknown",
-        employee: name,
-        target: totalTarget,
-        achieved,
-        prep: prepaid,
-        post: postpaid,
-        achievementPct,
-        prepPct,
-        postPct,
-        rank: 0,
-        fiveG: 0,
-        fiber: 0,
-      };
-    })
-    .filter((row) => row.employee);
-
-  const branchMap = new Map<
-    string,
-    Omit<BranchSummary, "achievementPct" | "prepPct" | "postPct">
-  >();
-  const employeeRows: DashboardRow[] = [];
-
-  for (const row of normalizedRows) {
-    if (row.employee) employeeRows.push(row);
-
-    if (row.branch) {
-      const existing = branchMap.get(row.branch) || {
-        branch: row.branch,
-        target: 0,
-        achieved: 0,
-        prep: 0,
-        post: 0,
-        fiveG: 0,
-        fiber: 0,
-      };
-
-      existing.target += row.target;
-      existing.achieved += row.achieved;
-      existing.prep += row.prep;
-      existing.post += row.post;
-      existing.fiveG += row.fiveG;
-      existing.fiber += row.fiber;
-
-      branchMap.set(row.branch, existing);
-    }
-  }
-
-  const branches: BranchSummary[] = Array.from(branchMap.values())
-    .map((branch) => ({
-      ...branch,
-      achievementPct:
-        branch.target > 0 ? (branch.achieved / branch.target) * 100 : 0,
-      prepPct:
-        branch.achieved > 0 ? (branch.prep / branch.achieved) * 100 : 0,
-      postPct:
-        branch.achieved > 0 ? (branch.post / branch.achieved) * 100 : 0,
-    }))
-    .sort((a, b) => b.achievementPct - a.achievementPct);
-
-  const employees: EmployeeRow[] = employeeRows
-    .map((emp) => ({
-      ...emp,
-      achievementPct:
-        emp.target > 0 ? (emp.achieved / emp.target) * 100 : emp.achievementPct,
-    }))
-    .sort((a, b) => {
-      if (b.achievementPct !== a.achievementPct) {
-        return b.achievementPct - a.achievementPct;
-      }
-      return b.achieved - a.achieved;
-    })
-    .map((emp, index) => ({ ...emp, uiRank: index + 1 }));
-
-  const totals = branches.reduce(
-    (acc, branch) => {
-      acc.target += branch.target;
-      acc.achieved += branch.achieved;
-      acc.prep += branch.prep;
-      acc.post += branch.post;
-      acc.fiveG += branch.fiveG;
-      acc.fiber += branch.fiber;
-      return acc;
-    },
-    {
-      target: 0,
-      achieved: 0,
-      prep: 0,
-      post: 0,
-      fiveG: 0,
-      fiber: 0,
-      achievementPct: 0,
-      prepPct: 0,
-      postPct: 0,
-    }
-  );
-
-  totals.achievementPct =
-    totals.target > 0 ? (totals.achieved / totals.target) * 100 : 0;
-  totals.prepPct =
-    totals.achieved > 0 ? (totals.prep / totals.achieved) * 100 : 0;
-  totals.postPct =
-    totals.achieved > 0 ? (totals.post / totals.achieved) * 100 : 0;
-
-  return {
-    headers,
-    branches,
-    employees,
-    totals,
-    topEmployee: employees[0] || null,
-  };
+  return json;
 }
 
 function StatCard({
@@ -381,23 +119,13 @@ function StatCard({
           <Icon className="h-4 w-4" />
         </div>
       </div>
-      <div className="text-3xl font-semibold tracking-tight text-white">
-        {value}
-      </div>
-      {subvalue ? (
-        <div className="mt-2 text-sm text-emerald-100/70">{subvalue}</div>
-      ) : null}
+      <div className="text-3xl font-semibold tracking-tight text-white">{value}</div>
+      {subvalue ? <div className="mt-2 text-sm text-emerald-100/70">{subvalue}</div> : null}
     </div>
   );
 }
 
-function MetricBadge({
-  label,
-  value,
-}: {
-  label: string;
-  value: string;
-}) {
+function MetricBadge({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-2xl border border-white/10 bg-black/10 px-3 py-2 text-sm text-emerald-50/90">
       <span className="mr-2 text-emerald-100/60">{label}</span>
@@ -422,12 +150,9 @@ export default function AbdulwahabExecutiveDashboard() {
     async function load() {
       try {
         setError("");
-        const raw = await fetchGoogleSheet(CONFIG.sheetId, CONFIG.sheetName);
-        const transformed = transformData(raw);
-
+        const result = await fetchDashboardData();
         if (!active) return;
-
-        setData(transformed);
+        setData(result);
         setLastUpdated(new Date());
       } catch (err) {
         if (!active) return;
@@ -447,18 +172,14 @@ export default function AbdulwahabExecutiveDashboard() {
   }, []);
 
   const selectedBranchData = useMemo(() => {
-    if (!data) return null;
-    if (selectedBranch === "ALL") return null;
+    if (!data || selectedBranch === "ALL") return null;
     return data.branches.find((b) => b.branch === selectedBranch) || null;
   }, [data, selectedBranch]);
 
   const visibleEmployees = useMemo(() => {
     if (!data) return [];
-
     return data.employees
-      .filter((emp) =>
-        selectedBranch === "ALL" ? true : emp.branch === selectedBranch
-      )
+      .filter((emp) => (selectedBranch === "ALL" ? true : emp.branch === selectedBranch))
       .filter((emp) => {
         const q = search.trim().toLowerCase();
         if (!q) return true;
@@ -467,7 +188,6 @@ export default function AbdulwahabExecutiveDashboard() {
   }, [data, selectedBranch, search]);
 
   const summary = selectedBranchData || data?.totals;
-
   const heroTopEmployee = useMemo(() => {
     if (!visibleEmployees.length) return data?.topEmployee || null;
     return visibleEmployees[0];
@@ -475,51 +195,38 @@ export default function AbdulwahabExecutiveDashboard() {
 
   async function downloadAsPng() {
     if (!dashboardRef.current) return;
-
     const canvas = await html2canvas(dashboardRef.current, {
       scale: 2,
       useCORS: true,
       backgroundColor: "#052e16",
     });
-
     const link = document.createElement("a");
-    link.download = `abdulwahab-dashboard-${
-      selectedBranch === "ALL" ? "all" : selectedBranch
-    }.png`;
+    link.download = `abdulwahab-dashboard-${selectedBranch === "ALL" ? "all" : selectedBranch}.png`;
     link.href = canvas.toDataURL("image/png");
     link.click();
   }
 
   async function downloadAsPdf() {
     if (!dashboardRef.current) return;
-
     const canvas = await html2canvas(dashboardRef.current, {
       scale: 2,
       useCORS: true,
       backgroundColor: "#052e16",
     });
-
     const imgData = canvas.toDataURL("image/png");
     const pdf = new jsPDF({
       orientation: "landscape",
       unit: "px",
       format: [canvas.width, canvas.height],
     });
-
     pdf.addImage(imgData, "PNG", 0, 0, canvas.width, canvas.height);
-    pdf.save(
-      `abdulwahab-dashboard-${
-        selectedBranch === "ALL" ? "all" : selectedBranch
-      }.pdf`
-    );
+    pdf.save(`abdulwahab-dashboard-${selectedBranch === "ALL" ? "all" : selectedBranch}.pdf`);
   }
 
   const branches = data?.branches || [];
 
   return (
-    <div
-      className={`min-h-screen ${captureMode ? "bg-[#052e16]" : "bg-slate-950"}`}
-    >
+    <div className={`min-h-screen ${captureMode ? "bg-[#052e16]" : "bg-slate-950"}`}>
       <div className="absolute inset-0 overflow-hidden">
         <div className="absolute left-0 top-0 h-96 w-96 rounded-full bg-emerald-500/20 blur-3xl" />
         <div className="absolute bottom-0 right-0 h-[28rem] w-[28rem] rounded-full bg-lime-400/10 blur-3xl" />
@@ -604,13 +311,10 @@ export default function AbdulwahabExecutiveDashboard() {
                       Executive Overview
                     </div>
                     <h2 className="text-2xl font-semibold text-white lg:text-4xl">
-                      {selectedBranch === "ALL"
-                        ? "All Abdulwahab Branches"
-                        : selectedBranch}
+                      {selectedBranch === "ALL" ? "All Abdulwahab Branches" : selectedBranch}
                     </h2>
                     <p className="mt-2 text-sm text-emerald-50/70">
-                      Last update:{" "}
-                      {lastUpdated ? lastUpdated.toLocaleString() : "—"}
+                      Last update: {lastUpdated ? lastUpdated.toLocaleString() : "—"}
                     </p>
                   </div>
 
@@ -620,21 +324,13 @@ export default function AbdulwahabExecutiveDashboard() {
                         <Trophy className="h-4 w-4" />
                         Top Employee
                       </div>
-                      <div className="text-xl font-semibold">
-                        {heroTopEmployee.employee}
-                      </div>
+                      <div className="text-xl font-semibold">{heroTopEmployee.employee}</div>
                       <div className="mt-1 text-sm text-amber-100/70">
                         {heroTopEmployee.branch || "No branch"}
                       </div>
                       <div className="mt-3 flex flex-wrap gap-2">
-                        <MetricBadge
-                          label="Achieved"
-                          value={formatNumber(heroTopEmployee.achieved)}
-                        />
-                        <MetricBadge
-                          label="Ach %"
-                          value={formatPct(heroTopEmployee.achievementPct)}
-                        />
+                        <MetricBadge label="Achieved" value={formatNumber(heroTopEmployee.achieved)} />
+                        <MetricBadge label="Ach %" value={formatPct(heroTopEmployee.achievementPct)} />
                       </div>
                     </div>
                   )}
@@ -642,59 +338,23 @@ export default function AbdulwahabExecutiveDashboard() {
               </div>
 
               <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-1">
-                <StatCard
-                  icon={Target}
-                  label="Target"
-                  value={formatNumber(summary?.target)}
-                  subvalue="Live from Google Sheets"
-                />
-                <StatCard
-                  icon={Building2}
-                  label="Achieved"
-                  value={formatNumber(summary?.achieved)}
-                  subvalue={formatPct(summary?.achievementPct)}
-                />
+                <StatCard icon={Target} label="Target" value={formatNumber(summary?.target)} subvalue="Live from Google Sheets" />
+                <StatCard icon={Building2} label="Achieved" value={formatNumber(summary?.achieved)} subvalue={formatPct(summary?.achievementPct)} />
               </div>
             </div>
 
             <div className="mb-8 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-              <StatCard
-                icon={Building2}
-                label="Branches"
-                value={String(branches.length)}
-                subvalue="Abdulwahab team only"
-              />
-              <StatCard
-                icon={Users}
-                label="Employees"
-                value={String(visibleEmployees.length)}
-                subvalue={
-                  selectedBranch === "ALL" ? "All branches" : selectedBranch
-                }
-              />
-              <StatCard
-                icon={Wifi}
-                label="Prep"
-                value={formatNumber(summary?.prep)}
-                subvalue={formatPct(summary?.prepPct)}
-              />
-              <StatCard
-                icon={Cable}
-                label="Post"
-                value={formatNumber(summary?.post)}
-                subvalue={formatPct(summary?.postPct)}
-              />
+              <StatCard icon={Building2} label="Branches" value={String(branches.length)} subvalue="Abdulwahab team only" />
+              <StatCard icon={Users} label="Employees" value={String(visibleEmployees.length)} subvalue={selectedBranch === "ALL" ? "All branches" : selectedBranch} />
+              <StatCard icon={Wifi} label="Prep" value={formatNumber(summary?.prep)} subvalue={formatPct(summary?.prepPct)} />
+              <StatCard icon={Cable} label="Post" value={formatNumber(summary?.post)} subvalue={formatPct(summary?.postPct)} />
             </div>
 
             <div className="mb-8 rounded-[2rem] border border-white/10 bg-black/10 p-5">
               <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
                 <div>
-                  <div className="text-lg font-semibold text-white">
-                    Branch Navigation
-                  </div>
-                  <div className="mt-1 text-sm text-emerald-100/60">
-                    Switch between branches or keep the full team view.
-                  </div>
+                  <div className="text-lg font-semibold text-white">Branch Navigation</div>
+                  <div className="mt-1 text-sm text-emerald-100/60">Switch between branches or keep the full team view.</div>
                 </div>
 
                 <div className="relative w-full max-w-sm">
@@ -711,7 +371,6 @@ export default function AbdulwahabExecutiveDashboard() {
               <div className="flex flex-wrap gap-3">
                 {["ALL", ...branches.map((b) => b.branch)].map((branch) => {
                   const active = selectedBranch === branch;
-
                   return (
                     <button
                       key={branch}
@@ -731,9 +390,7 @@ export default function AbdulwahabExecutiveDashboard() {
 
             <div className="mb-8 grid gap-5 xl:grid-cols-[1.1fr_0.9fr]">
               <div className="rounded-[2rem] border border-white/10 bg-black/10 p-5">
-                <div className="mb-4 text-lg font-semibold text-white">
-                  Branch Summary
-                </div>
+                <div className="mb-4 text-lg font-semibold text-white">Branch Summary</div>
                 <div className="overflow-x-auto">
                   <table className="min-w-full text-left text-sm">
                     <thead>
@@ -752,36 +409,16 @@ export default function AbdulwahabExecutiveDashboard() {
                       {branches.map((branch) => (
                         <tr
                           key={branch.branch}
-                          className={`border-b border-white/5 text-white/90 ${
-                            selectedBranch === branch.branch
-                              ? "bg-emerald-500/10"
-                              : ""
-                          }`}
+                          className={`border-b border-white/5 text-white/90 ${selectedBranch === branch.branch ? "bg-emerald-500/10" : ""}`}
                         >
-                          <td className="px-4 py-4 font-medium">
-                            {branch.branch}
-                          </td>
-                          <td className="px-4 py-4">
-                            {formatNumber(branch.target)}
-                          </td>
-                          <td className="px-4 py-4">
-                            {formatNumber(branch.achieved)}
-                          </td>
-                          <td className="px-4 py-4">
-                            {formatPct(branch.achievementPct)}
-                          </td>
-                          <td className="px-4 py-4">
-                            {formatNumber(branch.prep)}
-                          </td>
-                          <td className="px-4 py-4">
-                            {formatPct(branch.prepPct)}
-                          </td>
-                          <td className="px-4 py-4">
-                            {formatNumber(branch.post)}
-                          </td>
-                          <td className="px-4 py-4">
-                            {formatPct(branch.postPct)}
-                          </td>
+                          <td className="px-4 py-4 font-medium">{branch.branch}</td>
+                          <td className="px-4 py-4">{formatNumber(branch.target)}</td>
+                          <td className="px-4 py-4">{formatNumber(branch.achieved)}</td>
+                          <td className="px-4 py-4">{formatPct(branch.achievementPct)}</td>
+                          <td className="px-4 py-4">{formatNumber(branch.prep)}</td>
+                          <td className="px-4 py-4">{formatPct(branch.prepPct)}</td>
+                          <td className="px-4 py-4">{formatNumber(branch.post)}</td>
+                          <td className="px-4 py-4">{formatPct(branch.postPct)}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -791,39 +428,20 @@ export default function AbdulwahabExecutiveDashboard() {
 
               <div className="rounded-[2rem] border border-white/10 bg-black/10 p-5">
                 <div className="mb-4">
-                  <div className="text-lg font-semibold text-white">
-                    Scalable Metrics
-                  </div>
-                  <div className="mt-1 text-sm text-emerald-100/60">
-                    Ready for future KPIs like 5G and Fiber.
-                  </div>
+                  <div className="text-lg font-semibold text-white">Scalable Metrics</div>
+                  <div className="mt-1 text-sm text-emerald-100/60">Ready for future KPIs like 5G and Fiber.</div>
                 </div>
 
                 <div className="grid gap-4 md:grid-cols-2">
                   <div className="rounded-3xl border border-white/10 bg-white/5 p-5">
                     <div className="text-sm text-emerald-100/60">5G</div>
-                    <div className="mt-2 text-3xl font-semibold text-white">
-                      {formatNumber(summary?.fiveG)}
-                    </div>
-                    <div className="mt-2 text-sm text-emerald-100/50">
-                      Auto-detected if present in the sheet
-                    </div>
+                    <div className="mt-2 text-3xl font-semibold text-white">{formatNumber(summary?.fiveG)}</div>
                   </div>
 
                   <div className="rounded-3xl border border-white/10 bg-white/5 p-5">
                     <div className="text-sm text-emerald-100/60">Fiber</div>
-                    <div className="mt-2 text-3xl font-semibold text-white">
-                      {formatNumber(summary?.fiber)}
-                    </div>
-                    <div className="mt-2 text-sm text-emerald-100/50">
-                      Auto-detected if present in the sheet
-                    </div>
+                    <div className="mt-2 text-3xl font-semibold text-white">{formatNumber(summary?.fiber)}</div>
                   </div>
-                </div>
-
-                <div className="mt-5 rounded-3xl border border-dashed border-emerald-300/20 bg-emerald-500/5 p-4 text-sm text-emerald-50/75">
-                  To add more metrics later, just add columns in Google Sheets
-                  and extend the parser once.
                 </div>
               </div>
             </div>
@@ -831,12 +449,9 @@ export default function AbdulwahabExecutiveDashboard() {
             <div className="rounded-[2rem] border border-white/10 bg-black/10 p-5">
               <div className="mb-5 flex flex-col gap-2 lg:flex-row lg:items-end lg:justify-between">
                 <div>
-                  <div className="text-lg font-semibold text-white">
-                    Employee Ranking
-                  </div>
+                  <div className="text-lg font-semibold text-white">Employee Ranking</div>
                   <div className="mt-1 text-sm text-emerald-100/60">
-                    All employees included, sorted by performance with live
-                    progress bars.
+                    All employees included, sorted by performance with live progress bars.
                   </div>
                 </div>
                 <div className="text-sm text-emerald-100/60">
@@ -859,34 +474,15 @@ export default function AbdulwahabExecutiveDashboard() {
                   </thead>
                   <tbody>
                     {visibleEmployees.map((emp) => {
-                      const width = Math.max(
-                        0,
-                        Math.min(emp.achievementPct, 100)
-                      );
-
+                      const width = Math.max(0, Math.min(emp.achievementPct, 100));
                       return (
-                        <tr
-                          key={`${emp.employee}-${emp.branch}-${emp.uiRank}`}
-                          className="border-b border-white/5 text-white/90"
-                        >
-                          <td className="px-4 py-4 font-medium text-emerald-200">
-                            {emp.uiRank}
-                          </td>
-                          <td className="px-4 py-4 font-medium">
-                            {emp.employee || "—"}
-                          </td>
-                          <td className="px-4 py-4 text-emerald-50/70">
-                            {emp.branch || "—"}
-                          </td>
-                          <td className="px-4 py-4">
-                            {formatNumber(emp.target)}
-                          </td>
-                          <td className="px-4 py-4">
-                            {formatNumber(emp.achieved)}
-                          </td>
-                          <td className="px-4 py-4">
-                            {formatPct(emp.achievementPct)}
-                          </td>
+                        <tr key={`${emp.employee}-${emp.branch}-${emp.uiRank}`} className="border-b border-white/5 text-white/90">
+                          <td className="px-4 py-4 font-medium text-emerald-200">{emp.uiRank}</td>
+                          <td className="px-4 py-4 font-medium">{emp.employee}</td>
+                          <td className="px-4 py-4 text-emerald-50/70">{emp.branch}</td>
+                          <td className="px-4 py-4">{formatNumber(emp.target)}</td>
+                          <td className="px-4 py-4">{formatNumber(emp.achieved)}</td>
+                          <td className="px-4 py-4">{formatPct(emp.achievementPct)}</td>
                           <td className="px-4 py-4 min-w-[220px]">
                             <div className="h-3 overflow-hidden rounded-full bg-white/10">
                               <div
@@ -894,9 +490,7 @@ export default function AbdulwahabExecutiveDashboard() {
                                 style={{ width: `${width}%` }}
                               />
                             </div>
-                            <div className="mt-2 text-xs text-emerald-100/60">
-                              {formatPct(emp.achievementPct)}
-                            </div>
+                            <div className="mt-2 text-xs text-emerald-100/60">{formatPct(emp.achievementPct)}</div>
                           </td>
                         </tr>
                       );
