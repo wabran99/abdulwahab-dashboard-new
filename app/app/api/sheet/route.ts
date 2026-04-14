@@ -30,23 +30,9 @@ export async function GET() {
 
     const json = JSON.parse(match[1]);
     const table = json.table;
-
     const rows = table.rows || [];
 
     let currentBranch = "";
-    const employees: Array<{
-      employee: string;
-      branch: string;
-      target: number;
-      achieved: number;
-      prep: number;
-      post: number;
-      achievementPct: number;
-      prepPct: number;
-      postPct: number;
-      fiveG: number;
-      fiber: number;
-    }> = [];
 
     const toText = (cell: any) => {
       if (!cell) return "";
@@ -66,13 +52,28 @@ export async function GET() {
       return Number.isFinite(n) ? n : 0;
     };
 
+    const employees: Array<{
+      employee: string;
+      branch: string;
+      target: number;
+      achieved: number;
+      prep: number;
+      post: number;
+      achievementPct: number;
+      prepPct: number;
+      postPct: number;
+      fiveG: number;
+      fiber: number;
+      uiRank?: number;
+    }> = [];
+
     for (const row of rows) {
       const c = row.c || [];
 
-      const region = toText(c[0]);      // A
-      const shopCode = toText(c[1]);    // B
-      const name = toText(c[2]);        // C
-      const userName = toText(c[3]);    // D
+      const region = toText(c[0]);        // A
+      const shopCode = toText(c[1]);      // B
+      const name = toText(c[2]);          // C
+      const userName = toText(c[3]);      // D
       const totalTarget = toNumber(c[4]); // E
       const achieved = toNumber(c[10]);   // K
       const postpaid = toNumber(c[15]);   // P
@@ -96,11 +97,10 @@ export async function GET() {
 
       const isEmployeeRow = !!name && !!userName;
 
-      if (!isEmployeeRow) {
-        continue;
-      }
+      if (!isEmployeeRow) continue;
 
-      const achievementPct = totalTarget > 0 ? (achieved / totalTarget) * 100 : 0;
+      const achievementPct =
+        totalTarget > 0 ? (achieved / totalTarget) * 100 : 0;
       const prepPct = achieved > 0 ? (prepaid / achieved) * 100 : 0;
       const postPct = achieved > 0 ? (postpaid / achieved) * 100 : 0;
 
@@ -194,7 +194,7 @@ export async function GET() {
       }
     );
 
-    const payload = {
+    return Response.json({
       branches,
       employees: rankedEmployees,
       totals: {
@@ -204,9 +204,7 @@ export async function GET() {
         postPct: totals.achieved > 0 ? (totals.post / totals.achieved) * 100 : 0,
       },
       topEmployee: rankedEmployees[0] || null,
-    };
-
-    return Response.json(payload);
+    });
   } catch (error) {
     return Response.json(
       {
