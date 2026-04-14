@@ -1,25 +1,93 @@
-'use client';
+"use client";
 
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { motion } from 'framer-motion';
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { motion } from "framer-motion";
 import {
-  Building2,
-  Camera,
-  Cable,
   Download,
   FileDown,
+  Camera,
   RefreshCw,
-  Search,
-  Target,
   Trophy,
+  Target,
+  Building2,
   Users,
   Wifi,
-} from 'lucide-react';
-import html2canvas from 'html2canvas';
-import jsPDF from 'jspdf';
+  Cable,
+  Search,
+} from "lucide-react";
+import html2canvas from "html2canvas";
+import jsPDF from "jspdf";
 
-type Column = { id?: string; label?: string };
-type RawRow = Record<string, string | number>;
+const CONFIG = {
+  sheetId: "1EwSWZ9XsyRY_HBNq9elmEsN35wbvGZZ12Rn_7FJGD8o",
+  sheetName: "Adulwahab M Alshammari",
+  refreshMs: 60_000,
+  title: "Abdulwahab Team Executive Dashboard",
+  subtitle: "Live performance view powered by Google Sheets",
+};
+
+const COLUMN_ALIASES = {
+  branch: ["branch", "store", "store name", "storename", "branch name", "outlet", "location"],
+  employee: [
+    "employee",
+    "employee name",
+    "staff",
+    "staff name",
+    "advisor",
+    "salesperson",
+    "seller",
+    "user",
+    "name",
+  ],
+  target: ["target", "sales target", "monthly target", "goal"],
+  achieved: ["achieved", "approved sales", "sales", "actual", "achievement value", "achieved sales"],
+  achievementPct: ["achievement %", "achievement pct", "ach %", "achieved %", "achievement percentage"],
+  prep: ["prep", "prepaid", "pre", "prep sales"],
+  prepPct: ["prep %", "prep pct", "prepaid %", "prep percentage"],
+  post: ["post", "postpaid", "post sales", "postpaid sales"],
+  postPct: ["post %", "post pct", "postpaid %", "post percentage"],
+  rank: ["rank", "ranking", "position"],
+};
+
+const METRIC_ALIASES = {
+  fiveG: ["5g", "5g sales", "5g achieved", "5g count"],
+  fiber: ["fiber", "fibre", "fiber sales", "fiber achieved", "fiber count"],
+};
+
+type SheetColumn = {
+  id?: string;
+  label?: string;
+};
+
+type SheetCell = {
+  v?: string | number | null;
+  f?: string | null;
+};
+
+type SheetRow = {
+  c?: Array<SheetCell | null>;
+};
+
+type RawSheetData = {
+  columns: SheetColumn[];
+  rows: Record<string, string>[];
+};
+
+type DashboardRow = {
+  raw: Record<string, string>;
+  branch: string;
+  employee: string;
+  target: number;
+  achieved: number;
+  prep: number;
+  post: number;
+  achievementPct: number;
+  prepPct: number;
+  postPct: number;
+  rank: number;
+  fiveG: number;
+  fiber: number;
+};
 
 type BranchSummary = {
   branch: string;
@@ -27,25 +95,14 @@ type BranchSummary = {
   achieved: number;
   prep: number;
   post: number;
+  fiveG: number;
+  fiber: number;
   achievementPct: number;
   prepPct: number;
   postPct: number;
-  fiveG: number;
-  fiber: number;
 };
 
-type EmployeeRow = {
-  employee: string;
-  branch: string;
-  target: number;
-  achieved: number;
-  prep: number;
-  post: number;
-  achievementPct: number;
-  prepPct: number;
-  postPct: number;
-  fiveG: number;
-  fiber: number;
+type EmployeeRow = DashboardRow & {
   uiRank: number;
 };
 
@@ -53,89 +110,92 @@ type DashboardData = {
   headers: string[];
   branches: BranchSummary[];
   employees: EmployeeRow[];
-  totals: Omit<BranchSummary, 'branch'>;
+  totals: {
+    target: number;
+    achieved: number;
+    prep: number;
+    post: number;
+    fiveG: number;
+    fiber: number;
+    achievementPct: number;
+    prepPct: number;
+    postPct: number;
+  };
   topEmployee: EmployeeRow | null;
 };
 
-const CONFIG = {
-  sheetId: '1EwSWZ9XsyRY_HBNq9elmEsN35wbvGZZ12Rn_7FJGD8o',
-  sheetName: 'Adulwahab M Alshammari',
-  refreshMs: 60_000,
-  title: 'Abdulwahab Team Executive Dashboard',
-  subtitle: 'Live performance view powered by Google Sheets',
-};
-
-const COLUMN_ALIASES = {
-  branch: ['branch', 'store', 'store name', 'branch name', 'location'],
-  employee: ['employee', 'employee name', 'staff', 'staff name', 'advisor', 'salesperson', 'name'],
-  target: ['target', 'sales target', 'monthly target', 'goal'],
-  achieved: ['achieved', 'actual', 'sales', 'approved sales', 'achieved sales'],
-  achievementPct: ['achievement %', 'achievement pct', 'ach %', 'achievement percentage'],
-  prep: ['prep', 'prepaid', 'prep sales'],
-  prepPct: ['prep %', 'prep pct', 'prepaid %'],
-  post: ['post', 'postpaid', 'post sales'],
-  postPct: ['post %', 'post pct', 'postpaid %'],
-  rank: ['rank', 'ranking', 'position'],
-  fiveG: ['5g', '5g sales', '5g achieved', '5g count'],
-  fiber: ['fiber', 'fibre', 'fiber sales', 'fiber achieved', 'fiber count'],
-};
-
 function normalizeKey(value: unknown) {
-  return String(value ?? '')
+  return String(value ?? "")
     .toLowerCase()
-    .replace(/[%]/g, ' pct ')
-    .replace(/[_\-/]+/g, ' ')
-    .replace(/\s+/g, ' ')
+    .replace(/[\u0660-\u0669]/g, (d) => "٠١٢٣٤٥٦٧٨٩".indexOf(d).toString())
+    .replace(/[%]/g, " pct ")
+    .replace(/[_\-\/]+/g, " ")
+    .replace(/\s+/g, " ")
     .trim();
 }
 
 function cleanText(value: unknown) {
-  return String(value ?? '').replace(/\s+/g, ' ').trim();
+  return String(value ?? "").replace(/\s+/g, " ").trim();
 }
 
 function toNumber(value: unknown) {
-  if (typeof value === 'number') return value;
+  if (typeof value === "number") return value;
   if (value == null) return 0;
-  const raw = String(value).replace(/٬/g, '').replace(/,/g, '').replace(/٫/g, '.').replace(/%/g, '').trim();
+
+  const raw = String(value)
+    .replace(/٬/g, "")
+    .replace(/,/g, "")
+    .replace(/٫/g, ".")
+    .replace(/%/g, "")
+    .trim();
+
   const parsed = Number(raw);
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+function pct(value: unknown, fallback = 0) {
+  const n = toNumber(value);
+  return Number.isFinite(n) ? n : fallback;
+}
+
 function formatNumber(value: unknown) {
-  return new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 }).format(toNumber(value));
+  return new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 }).format(toNumber(value));
 }
 
 function formatPct(value: unknown) {
-  return `${toNumber(value).toFixed(1)}%`;
+  return `${pct(value).toFixed(1)}%`;
 }
 
-function getCellValue(cell: { f?: string | number; v?: string | number } | null | undefined) {
-  if (!cell) return '';
-  if (cell.f != null) return cell.f;
-  if (cell.v != null) return cell.v;
-  return '';
+function getCellValue(cell: SheetCell | null | undefined) {
+  if (!cell) return "";
+  if (cell.f != null) return String(cell.f);
+  if (cell.v != null) return String(cell.v);
+  return "";
 }
 
-function findColumnIndex(columns: Column[], aliases: string[]) {
-  const normalizedAliases = aliases.map(normalizeKey);
+function findColumnIndex(columns: SheetColumn[], aliases: string[]) {
+  const aliasSet = aliases.map(normalizeKey);
+
   return columns.findIndex((col) => {
-    const normalized = normalizeKey(col.label || col.id || '');
-    return normalizedAliases.some((alias) => normalized === alias || normalized.includes(alias));
+    const normalized = normalizeKey(col.label || col.id || "");
+    return aliasSet.some((alias) => normalized === alias || normalized.includes(alias));
   });
 }
 
-function buildRowObject(columns: Column[], row: { c?: Array<{ f?: string | number; v?: string | number } | null> }) {
+function buildRowObject(columns: SheetColumn[], row: SheetRow) {
   const values = row.c || [];
-  const obj: RawRow = {};
+  const obj: Record<string, string> = {};
+
   columns.forEach((col, index) => {
     const key = cleanText(col.label || col.id || `column_${index + 1}`);
     obj[key] = getCellValue(values[index]);
   });
+
   return obj;
 }
 
-async function fetchGoogleSheet(sheetId: string, sheetName: string) {
-  const response = await fetch("/api/sheet");
+async function fetchGoogleSheet(_sheetId: string, _sheetName: string): Promise<RawSheetData> {
+  const response = await fetch("/api/sheet", { cache: "no-store" });
 
   if (!response.ok) {
     throw new Error("Failed to fetch data from API");
@@ -143,57 +203,63 @@ async function fetchGoogleSheet(sheetId: string, sheetName: string) {
 
   const json = await response.json();
 
-  if (!json.table) {
+  if (!json?.table) {
     throw new Error("Invalid data format from Google Sheets");
   }
 
   const table = json.table;
-  const columns = table.cols || [];
-  const rows = (table.rows || []).map((row: any) => buildRowObject(columns, row));
+  const columns: SheetColumn[] = table.cols || [];
+  const rows: Record<string, string>[] = (table.rows || []).map((row: SheetRow) =>
+    buildRowObject(columns, row)
+  );
 
   return { columns, rows };
 }
-  
 
-  if (!match) {
-    throw new Error('Unable to parse Google Sheets response. Ensure the sheet is public as Viewer.');
-  }
+function resolveIndexes(columns: SheetColumn[]) {
+  const map: Record<string, number> = {};
 
-  const json = JSON.parse(match[1]) as {
-    table: { cols: Column[]; rows: Array<{ c?: Array<{ f?: string | number; v?: string | number } | null> }> };
-  };
+  Object.entries(COLUMN_ALIASES).forEach(([key, aliases]) => {
+    map[key] = findColumnIndex(columns, aliases);
+  });
 
-  const columns = json.table.cols || [];
-  const rows = (json.table.rows || []).map((row) => buildRowObject(columns, row));
-  return { columns, rows };
+  Object.entries(METRIC_ALIASES).forEach(([key, aliases]) => {
+    map[key] = findColumnIndex(columns, aliases);
+  });
+
+  return map;
 }
 
-function transformData(raw: { columns: Column[]; rows: RawRow[] }): DashboardData {
-  const headers = raw.columns.map((c) => cleanText(c.label || c.id || ''));
-  const indexMap = Object.fromEntries(
-    Object.entries(COLUMN_ALIASES).map(([key, aliases]) => [key, findColumnIndex(raw.columns, aliases)])
-  ) as Record<string, number>;
+function transformData(raw: RawSheetData): DashboardData {
+  const { columns, rows } = raw;
+  const indexMap = resolveIndexes(columns);
+  const headers = columns.map((c) => cleanText(c.label || c.id || ""));
 
-  const normalized = raw.rows
+  const normalizedRows: DashboardRow[] = rows
     .map((row) => {
-      const read = (key: string) => {
-        const index = indexMap[key];
-        if (index == null || index < 0) return '';
-        const header = headers[index];
-        return row[header] ?? '';
+      const byIndex = Object.fromEntries(headers.map((header) => [header, row[header]]));
+
+      const read = (index: number) => {
+        if (index == null || index < 0 || index >= headers.length) return "";
+        return byIndex[headers[index]];
       };
 
-      const target = toNumber(read('target'));
-      const achieved = toNumber(read('achieved'));
-      const prep = toNumber(read('prep'));
-      const post = toNumber(read('post'));
-      const achievementPct = indexMap.achievementPct >= 0 ? toNumber(read('achievementPct')) : target > 0 ? (achieved / target) * 100 : 0;
-      const prepPct = indexMap.prepPct >= 0 ? toNumber(read('prepPct')) : achieved > 0 ? (prep / achieved) * 100 : 0;
-      const postPct = indexMap.postPct >= 0 ? toNumber(read('postPct')) : achieved > 0 ? (post / achieved) * 100 : 0;
+      const target = toNumber(read(indexMap.target));
+      const achieved = toNumber(read(indexMap.achieved));
+      const prep = toNumber(read(indexMap.prep));
+      const post = toNumber(read(indexMap.post));
+
+      const achievementPct =
+        indexMap.achievementPct >= 0 ? pct(read(indexMap.achievementPct)) : target > 0 ? (achieved / target) * 100 : 0;
+
+      const prepPct = indexMap.prepPct >= 0 ? pct(read(indexMap.prepPct)) : achieved > 0 ? (prep / achieved) * 100 : 0;
+
+      const postPct = indexMap.postPct >= 0 ? pct(read(indexMap.postPct)) : achieved > 0 ? (post / achieved) * 100 : 0;
 
       return {
-        branch: cleanText(read('branch')),
-        employee: cleanText(read('employee')),
+        raw: row,
+        branch: cleanText(read(indexMap.branch)),
+        employee: cleanText(read(indexMap.employee)),
         target,
         achieved,
         prep,
@@ -201,40 +267,42 @@ function transformData(raw: { columns: Column[]; rows: RawRow[] }): DashboardDat
         achievementPct,
         prepPct,
         postPct,
-        fiveG: toNumber(read('fiveG')),
-        fiber: toNumber(read('fiber')),
+        rank: toNumber(read(indexMap.rank)),
+        fiveG: toNumber(read(indexMap.fiveG)),
+        fiber: toNumber(read(indexMap.fiber)),
       };
     })
     .filter((row) => row.branch || row.employee || row.target || row.achieved);
 
-  const branchMap = new Map<string, BranchSummary>();
-  const employeesBase = normalized.filter((row) => row.employee);
+  const branchMap = new Map<string, Omit<BranchSummary, "achievementPct" | "prepPct" | "postPct">>();
+  const employeeRows: DashboardRow[] = [];
 
-  normalized.forEach((row) => {
-    if (!row.branch) return;
-    const existing = branchMap.get(row.branch) || {
-      branch: row.branch,
-      target: 0,
-      achieved: 0,
-      prep: 0,
-      post: 0,
-      achievementPct: 0,
-      prepPct: 0,
-      postPct: 0,
-      fiveG: 0,
-      fiber: 0,
-    };
+  for (const row of normalizedRows) {
+    if (row.employee) employeeRows.push(row);
 
-    existing.target += row.target;
-    existing.achieved += row.achieved;
-    existing.prep += row.prep;
-    existing.post += row.post;
-    existing.fiveG += row.fiveG;
-    existing.fiber += row.fiber;
-    branchMap.set(row.branch, existing);
-  });
+    if (row.branch) {
+      const existing = branchMap.get(row.branch) || {
+        branch: row.branch,
+        target: 0,
+        achieved: 0,
+        prep: 0,
+        post: 0,
+        fiveG: 0,
+        fiber: 0,
+      };
 
-  const branches = Array.from(branchMap.values())
+      existing.target += row.target;
+      existing.achieved += row.achieved;
+      existing.prep += row.prep;
+      existing.post += row.post;
+      existing.fiveG += row.fiveG;
+      existing.fiber += row.fiber;
+
+      branchMap.set(row.branch, existing);
+    }
+  }
+
+  const branches: BranchSummary[] = Array.from(branchMap.values())
     .map((branch) => ({
       ...branch,
       achievementPct: branch.target > 0 ? (branch.achieved / branch.target) * 100 : 0,
@@ -243,13 +311,16 @@ function transformData(raw: { columns: Column[]; rows: RawRow[] }): DashboardDat
     }))
     .sort((a, b) => b.achievementPct - a.achievementPct);
 
-  const employees = employeesBase
-    .map((row) => ({
-      ...row,
-      achievementPct: row.target > 0 ? (row.achieved / row.target) * 100 : row.achievementPct,
+  const employees: EmployeeRow[] = employeeRows
+    .map((emp) => ({
+      ...emp,
+      achievementPct: emp.target > 0 ? (emp.achieved / emp.target) * 100 : emp.achievementPct,
     }))
-    .sort((a, b) => (b.achievementPct === a.achievementPct ? b.achieved - a.achieved : b.achievementPct - a.achievementPct))
-    .map((row, index) => ({ ...row, uiRank: index + 1 }));
+    .sort((a, b) => {
+      if (b.achievementPct !== a.achievementPct) return b.achievementPct - a.achievementPct;
+      return b.achieved - a.achieved;
+    })
+    .map((emp, index) => ({ ...emp, uiRank: index + 1 }));
 
   const totals = branches.reduce(
     (acc, branch) => {
@@ -266,11 +337,11 @@ function transformData(raw: { columns: Column[]; rows: RawRow[] }): DashboardDat
       achieved: 0,
       prep: 0,
       post: 0,
+      fiveG: 0,
+      fiber: 0,
       achievementPct: 0,
       prepPct: 0,
       postPct: 0,
-      fiveG: 0,
-      fiber: 0,
     }
   );
 
@@ -293,7 +364,7 @@ function StatCard({
   value,
   subvalue,
 }: {
-  icon: typeof Target;
+  icon: React.ComponentType<{ className?: string }>;
   label: string;
   value: string;
   subvalue?: string;
@@ -323,12 +394,12 @@ function MetricBadge({ label, value }: { label: string; value: string }) {
 
 export default function AbdulwahabExecutiveDashboard() {
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
+  const [error, setError] = useState("");
   const [data, setData] = useState<DashboardData | null>(null);
-  const [selectedBranch, setSelectedBranch] = useState('ALL');
-  const [captureMode, setCaptureMode] = useState(false);
-  const [search, setSearch] = useState('');
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  const [selectedBranch, setSelectedBranch] = useState("ALL");
+  const [captureMode, setCaptureMode] = useState(false);
+  const [search, setSearch] = useState("");
   const dashboardRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -336,81 +407,106 @@ export default function AbdulwahabExecutiveDashboard() {
 
     async function load() {
       try {
-        setError('');
+        setError("");
         const raw = await fetchGoogleSheet(CONFIG.sheetId, CONFIG.sheetName);
         const transformed = transformData(raw);
+
         if (!active) return;
+
         setData(transformed);
         setLastUpdated(new Date());
       } catch (err) {
         if (!active) return;
-        setError(err instanceof Error ? err.message : 'Failed to load data.');
+        setError(err instanceof Error ? err.message : "Failed to load data.");
       } finally {
         if (active) setLoading(false);
       }
     }
 
-    void load();
-    const timer = window.setInterval(load, CONFIG.refreshMs);
+    load();
+    const interval = setInterval(load, CONFIG.refreshMs);
+
     return () => {
       active = false;
-      window.clearInterval(timer);
+      clearInterval(interval);
     };
   }, []);
 
-  const branches = data?.branches ?? [];
-
   const selectedBranchData = useMemo(() => {
-    if (!data || selectedBranch === 'ALL') return null;
-    return data.branches.find((branch) => branch.branch === selectedBranch) || null;
+    if (!data) return null;
+    if (selectedBranch === "ALL") return null;
+    return data.branches.find((b) => b.branch === selectedBranch) || null;
   }, [data, selectedBranch]);
 
   const visibleEmployees = useMemo(() => {
     if (!data) return [];
-    const q = search.trim().toLowerCase();
+
     return data.employees
-      .filter((emp) => (selectedBranch === 'ALL' ? true : emp.branch === selectedBranch))
-      .filter((emp) => (!q ? true : `${emp.employee} ${emp.branch}`.toLowerCase().includes(q)));
+      .filter((emp) => (selectedBranch === "ALL" ? true : emp.branch === selectedBranch))
+      .filter((emp) => {
+        const q = search.trim().toLowerCase();
+        if (!q) return true;
+        return `${emp.employee} ${emp.branch}`.toLowerCase().includes(q);
+      });
   }, [data, selectedBranch, search]);
 
   const summary = selectedBranchData || data?.totals;
-  const topEmployee = visibleEmployees[0] || data?.topEmployee || null;
+
+  const heroTopEmployee = useMemo(() => {
+    if (!visibleEmployees.length) return data?.topEmployee || null;
+    return visibleEmployees[0];
+  }, [visibleEmployees, data]);
 
   async function downloadAsPng() {
     if (!dashboardRef.current) return;
+
     const canvas = await html2canvas(dashboardRef.current, {
       scale: 2,
       useCORS: true,
-      backgroundColor: '#052e16',
+      backgroundColor: "#052e16",
     });
-    const link = document.createElement('a');
-    link.download = `abdulwahab-dashboard-${selectedBranch === 'ALL' ? 'all' : selectedBranch}.png`;
-    link.href = canvas.toDataURL('image/png');
+
+    const link = document.createElement("a");
+    link.download = `abdulwahab-dashboard-${selectedBranch === "ALL" ? "all" : selectedBranch}.png`;
+    link.href = canvas.toDataURL("image/png");
     link.click();
   }
 
   async function downloadAsPdf() {
     if (!dashboardRef.current) return;
+
     const canvas = await html2canvas(dashboardRef.current, {
       scale: 2,
       useCORS: true,
-      backgroundColor: '#052e16',
+      backgroundColor: "#052e16",
     });
-    const pdf = new jsPDF({ orientation: 'landscape', unit: 'px', format: [canvas.width, canvas.height] });
-    pdf.addImage(canvas.toDataURL('image/png'), 'PNG', 0, 0, canvas.width, canvas.height);
-    pdf.save(`abdulwahab-dashboard-${selectedBranch === 'ALL' ? 'all' : selectedBranch}.pdf`);
+
+    const imgData = canvas.toDataURL("image/png");
+    const pdf = new jsPDF({
+      orientation: "landscape",
+      unit: "px",
+      format: [canvas.width, canvas.height],
+    });
+
+    pdf.addImage(imgData, "PNG", 0, 0, canvas.width, canvas.height);
+    pdf.save(`abdulwahab-dashboard-${selectedBranch === "ALL" ? "all" : selectedBranch}.pdf`);
   }
 
+  const branches = data?.branches || [];
+
   return (
-    <div className={`min-h-screen ${captureMode ? 'bg-[#052e16]' : 'bg-slate-950'}`}>
+    <div className={`min-h-screen ${captureMode ? "bg-[#052e16]" : "bg-slate-950"}`}>
       <div className="absolute inset-0 overflow-hidden">
         <div className="absolute left-0 top-0 h-96 w-96 rounded-full bg-emerald-500/20 blur-3xl" />
         <div className="absolute bottom-0 right-0 h-[28rem] w-[28rem] rounded-full bg-lime-400/10 blur-3xl" />
+        {!captureMode && (
+          <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(16,185,129,0.12),transparent_35%)]" />
+        )}
       </div>
 
       <div className="relative mx-auto max-w-7xl p-6 lg:p-8">
-        {!captureMode && (
-          <div className="mb-6 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+        <div className={`${captureMode ? "hidden" : "mb-6"}`}>
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
             <div>
               <div className="mb-2 inline-flex items-center gap-2 rounded-full border border-emerald-300/20 bg-emerald-400/10 px-4 py-1 text-xs font-medium uppercase tracking-[0.2em] text-emerald-200">
                 Live Google Sheets
@@ -424,29 +520,36 @@ export default function AbdulwahabExecutiveDashboard() {
                 onClick={() => window.location.reload()}
                 className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/10 px-4 py-3 text-sm font-medium text-white shadow-xl backdrop-blur-xl transition hover:bg-white/15"
               >
-                <RefreshCw className="h-4 w-4" /> Refresh
+                <RefreshCw className="h-4 w-4" />
+                Refresh
               </button>
+
               <button
                 onClick={() => setCaptureMode((v) => !v)}
                 className="inline-flex items-center gap-2 rounded-2xl border border-emerald-300/20 bg-emerald-500/15 px-4 py-3 text-sm font-medium text-emerald-100 shadow-xl backdrop-blur-xl transition hover:bg-emerald-500/25"
               >
-                <Camera className="h-4 w-4" /> {captureMode ? 'Exit Capture Mode' : 'Capture Mode'}
+                <Camera className="h-4 w-4" />
+                {captureMode ? "Exit Capture Mode" : "Capture Mode"}
               </button>
+
               <button
                 onClick={downloadAsPng}
                 className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/10 px-4 py-3 text-sm font-medium text-white shadow-xl backdrop-blur-xl transition hover:bg-white/15"
               >
-                <Download className="h-4 w-4" /> PNG
+                <Download className="h-4 w-4" />
+                PNG
               </button>
+
               <button
                 onClick={downloadAsPdf}
                 className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/10 px-4 py-3 text-sm font-medium text-white shadow-xl backdrop-blur-xl transition hover:bg-white/15"
               >
-                <FileDown className="h-4 w-4" /> PDF
+                <FileDown className="h-4 w-4" />
+                PDF
               </button>
             </div>
           </div>
-        )}
+        </div>
 
         {loading ? (
           <div className="rounded-3xl border border-white/10 bg-white/10 p-8 text-white shadow-2xl backdrop-blur-xl">
@@ -456,7 +559,9 @@ export default function AbdulwahabExecutiveDashboard() {
           <div className="rounded-3xl border border-rose-300/20 bg-rose-500/10 p-8 text-rose-100 shadow-2xl backdrop-blur-xl">
             <div className="text-lg font-semibold">Connection error</div>
             <div className="mt-2 text-sm opacity-90">{error}</div>
-            <div className="mt-4 text-sm opacity-75">Set the Google Sheet to Anyone with the link → Viewer.</div>
+            <div className="mt-4 text-sm opacity-75">
+              Ensure the Google Sheet is shared publicly as Viewer and the API route is working.
+            </div>
           </div>
         ) : (
           <motion.div
@@ -474,23 +579,24 @@ export default function AbdulwahabExecutiveDashboard() {
                       Executive Overview
                     </div>
                     <h2 className="text-2xl font-semibold text-white lg:text-4xl">
-                      {selectedBranch === 'ALL' ? 'All Abdulwahab Branches' : selectedBranch}
+                      {selectedBranch === "ALL" ? "All Abdulwahab Branches" : selectedBranch}
                     </h2>
                     <p className="mt-2 text-sm text-emerald-50/70">
-                      Last update: {lastUpdated ? lastUpdated.toLocaleString() : '—'}
+                      Last update: {lastUpdated ? lastUpdated.toLocaleString() : "—"}
                     </p>
                   </div>
 
-                  {topEmployee && (
+                  {heroTopEmployee && (
                     <div className="min-w-[250px] rounded-3xl border border-amber-200/20 bg-amber-300/10 p-4 text-amber-50 shadow-2xl">
                       <div className="mb-2 flex items-center gap-2 text-xs uppercase tracking-[0.18em] text-amber-100/80">
-                        <Trophy className="h-4 w-4" /> Top Employee
+                        <Trophy className="h-4 w-4" />
+                        Top Employee
                       </div>
-                      <div className="text-xl font-semibold">{topEmployee.employee}</div>
-                      <div className="mt-1 text-sm text-amber-100/70">{topEmployee.branch || 'No branch'}</div>
+                      <div className="text-xl font-semibold">{heroTopEmployee.employee}</div>
+                      <div className="mt-1 text-sm text-amber-100/70">{heroTopEmployee.branch || "No branch"}</div>
                       <div className="mt-3 flex flex-wrap gap-2">
-                        <MetricBadge label="Achieved" value={formatNumber(topEmployee.achieved)} />
-                        <MetricBadge label="Ach %" value={formatPct(topEmployee.achievementPct)} />
+                        <MetricBadge label="Achieved" value={formatNumber(heroTopEmployee.achieved)} />
+                        <MetricBadge label="Ach %" value={formatPct(heroTopEmployee.achievementPct)} />
                       </div>
                     </div>
                   )}
@@ -499,13 +605,23 @@ export default function AbdulwahabExecutiveDashboard() {
 
               <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-1">
                 <StatCard icon={Target} label="Target" value={formatNumber(summary?.target)} subvalue="Live from Google Sheets" />
-                <StatCard icon={Building2} label="Achieved" value={formatNumber(summary?.achieved)} subvalue={formatPct(summary?.achievementPct)} />
+                <StatCard
+                  icon={Building2}
+                  label="Achieved"
+                  value={formatNumber(summary?.achieved)}
+                  subvalue={formatPct(summary?.achievementPct)}
+                />
               </div>
             </div>
 
             <div className="mb-8 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
               <StatCard icon={Building2} label="Branches" value={String(branches.length)} subvalue="Abdulwahab team only" />
-              <StatCard icon={Users} label="Employees" value={String(visibleEmployees.length)} subvalue={selectedBranch === 'ALL' ? 'All branches' : selectedBranch} />
+              <StatCard
+                icon={Users}
+                label="Employees"
+                value={String(visibleEmployees.length)}
+                subvalue={selectedBranch === "ALL" ? "All branches" : selectedBranch}
+              />
               <StatCard icon={Wifi} label="Prep" value={formatNumber(summary?.prep)} subvalue={formatPct(summary?.prepPct)} />
               <StatCard icon={Cable} label="Post" value={formatNumber(summary?.post)} subvalue={formatPct(summary?.postPct)} />
             </div>
@@ -516,6 +632,7 @@ export default function AbdulwahabExecutiveDashboard() {
                   <div className="text-lg font-semibold text-white">Branch Navigation</div>
                   <div className="mt-1 text-sm text-emerald-100/60">Switch between branches or keep the full team view.</div>
                 </div>
+
                 <div className="relative w-full max-w-sm">
                   <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-emerald-100/50" />
                   <input
@@ -528,19 +645,20 @@ export default function AbdulwahabExecutiveDashboard() {
               </div>
 
               <div className="flex flex-wrap gap-3">
-                {['ALL', ...branches.map((b) => b.branch)].map((branch) => {
+                {["ALL", ...branches.map((b) => b.branch)].map((branch) => {
                   const active = selectedBranch === branch;
+
                   return (
                     <button
                       key={branch}
                       onClick={() => setSelectedBranch(branch)}
                       className={`rounded-2xl border px-4 py-3 text-sm font-medium transition ${
                         active
-                          ? 'border-emerald-300/20 bg-emerald-500/20 text-white shadow-xl'
-                          : 'border-white/10 bg-white/5 text-emerald-50/80 hover:bg-white/10'
+                          ? "border-emerald-300/20 bg-emerald-500/20 text-white shadow-xl"
+                          : "border-white/10 bg-white/5 text-emerald-50/80 hover:bg-white/10"
                       }`}
                     >
-                      {branch === 'ALL' ? 'All Branches' : branch}
+                      {branch === "ALL" ? "All Branches" : branch}
                     </button>
                   );
                 })}
@@ -568,7 +686,7 @@ export default function AbdulwahabExecutiveDashboard() {
                       {branches.map((branch) => (
                         <tr
                           key={branch.branch}
-                          className={`border-b border-white/5 text-white/90 ${selectedBranch === branch.branch ? 'bg-emerald-500/10' : ''}`}
+                          className={`border-b border-white/5 text-white/90 ${selectedBranch === branch.branch ? "bg-emerald-500/10" : ""}`}
                         >
                           <td className="px-4 py-4 font-medium">{branch.branch}</td>
                           <td className="px-4 py-4">{formatNumber(branch.target)}</td>
@@ -586,19 +704,27 @@ export default function AbdulwahabExecutiveDashboard() {
               </div>
 
               <div className="rounded-[2rem] border border-white/10 bg-black/10 p-5">
-                <div className="text-lg font-semibold text-white">Scalable Metrics</div>
-                <div className="mt-1 text-sm text-emerald-100/60">Ready for future KPIs like 5G and Fiber.</div>
-                <div className="mt-5 grid gap-4 md:grid-cols-2">
+                <div className="mb-4">
+                  <div className="text-lg font-semibold text-white">Scalable Metrics</div>
+                  <div className="mt-1 text-sm text-emerald-100/60">Ready for future KPIs like 5G and Fiber.</div>
+                </div>
+
+                <div className="grid gap-4 md:grid-cols-2">
                   <div className="rounded-3xl border border-white/10 bg-white/5 p-5">
                     <div className="text-sm text-emerald-100/60">5G</div>
                     <div className="mt-2 text-3xl font-semibold text-white">{formatNumber(summary?.fiveG)}</div>
                     <div className="mt-2 text-sm text-emerald-100/50">Auto-detected if present in the sheet</div>
                   </div>
+
                   <div className="rounded-3xl border border-white/10 bg-white/5 p-5">
                     <div className="text-sm text-emerald-100/60">Fiber</div>
                     <div className="mt-2 text-3xl font-semibold text-white">{formatNumber(summary?.fiber)}</div>
                     <div className="mt-2 text-sm text-emerald-100/50">Auto-detected if present in the sheet</div>
                   </div>
+                </div>
+
+                <div className="mt-5 rounded-3xl border border-dashed border-emerald-300/20 bg-emerald-500/5 p-4 text-sm text-emerald-50/75">
+                  To add more metrics later, just add columns in Google Sheets and extend the alias map once.
                 </div>
               </div>
             </div>
@@ -607,7 +733,9 @@ export default function AbdulwahabExecutiveDashboard() {
               <div className="mb-5 flex flex-col gap-2 lg:flex-row lg:items-end lg:justify-between">
                 <div>
                   <div className="text-lg font-semibold text-white">Employee Ranking</div>
-                  <div className="mt-1 text-sm text-emerald-100/60">All employees included, sorted by performance with live progress bars.</div>
+                  <div className="mt-1 text-sm text-emerald-100/60">
+                    All employees included, sorted by performance with live progress bars.
+                  </div>
                 </div>
                 <div className="text-sm text-emerald-100/60">Showing {visibleEmployees.length} employees</div>
               </div>
@@ -626,17 +754,18 @@ export default function AbdulwahabExecutiveDashboard() {
                     </tr>
                   </thead>
                   <tbody>
-                    {visibleEmployees.map((emp, idx) => {
+                    {visibleEmployees.map((emp) => {
                       const width = Math.max(0, Math.min(emp.achievementPct, 100));
+
                       return (
-                        <tr key={`${emp.employee}-${emp.branch}-${idx}`} className="border-b border-white/5 text-white/90">
-                          <td className="px-4 py-4 font-medium text-emerald-200">{idx + 1}</td>
-                          <td className="px-4 py-4 font-medium">{emp.employee || '—'}</td>
-                          <td className="px-4 py-4 text-emerald-50/70">{emp.branch || '—'}</td>
+                        <tr key={`${emp.employee}-${emp.branch}-${emp.uiRank}`} className="border-b border-white/5 text-white/90">
+                          <td className="px-4 py-4 font-medium text-emerald-200">{emp.uiRank}</td>
+                          <td className="px-4 py-4 font-medium">{emp.employee || "—"}</td>
+                          <td className="px-4 py-4 text-emerald-50/70">{emp.branch || "—"}</td>
                           <td className="px-4 py-4">{formatNumber(emp.target)}</td>
                           <td className="px-4 py-4">{formatNumber(emp.achieved)}</td>
                           <td className="px-4 py-4">{formatPct(emp.achievementPct)}</td>
-                          <td className="min-w-[220px] px-4 py-4">
+                          <td className="px-4 py-4 min-w-[220px]">
                             <div className="h-3 overflow-hidden rounded-full bg-white/10">
                               <div
                                 className="h-full rounded-full bg-gradient-to-r from-emerald-400 via-lime-300 to-emerald-200"
