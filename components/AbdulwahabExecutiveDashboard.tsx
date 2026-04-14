@@ -235,45 +235,87 @@ function transformData(raw: RawSheetData): DashboardData {
   const indexMap = resolveIndexes(columns);
   const headers = columns.map((c) => cleanText(c.label || c.id || ""));
 
+    let currentBranch = "";
+
   const normalizedRows: DashboardRow[] = rows
     .map((row) => {
-      const byIndex = Object.fromEntries(headers.map((header) => [header, row[header]]));
+      const region = cleanText(row["Region"]);
+      const shopCode = cleanText(row["Shop Code"]);
+      const name = cleanText(row["Name"]);
+      const userName = cleanText(row["UserName"]);
+      const totalTarget = toNumber(row["Total Target"]);
+      const achieved = toNumber(row["Achieved"]);
+      const ftth = toNumber(row["FTTH"]);
+      const fiveGHome = toNumber(row["5G Home"]);
+      const postpaid = toNumber(row["postpaid"]);
+      const prepaid = toNumber(row["prepaid"]);
 
-      const read = (index: number) => {
-        if (index == null || index < 0 || index >= headers.length) return "";
-        return byIndex[headers[index]];
-      };
+      const isBranchHeader =
+        !!name &&
+        !userName &&
+        !shopCode &&
+        (name.toLowerCase().includes("fbo") || name.toLowerCase().includes("road") || name.toLowerCase().includes("mall"));
 
-      const target = toNumber(read(indexMap.target));
-      const achieved = toNumber(read(indexMap.achieved));
-      const prep = toNumber(read(indexMap.prep));
-      const post = toNumber(read(indexMap.post));
+      if (isBranchHeader) {
+        currentBranch = name;
+        return {
+          raw: row,
+          branch: "",
+          employee: "",
+          target: 0,
+          achieved: 0,
+          prep: 0,
+          post: 0,
+          achievementPct: 0,
+          prepPct: 0,
+          postPct: 0,
+          rank: 0,
+          fiveG: 0,
+          fiber: 0,
+        };
+      }
 
-      const achievementPct =
-        indexMap.achievementPct >= 0 ? pct(read(indexMap.achievementPct)) : target > 0 ? (achieved / target) * 100 : 0;
+      const isEmployeeRow = !!name && !!userName;
 
-      const prepPct = indexMap.prepPct >= 0 ? pct(read(indexMap.prepPct)) : achieved > 0 ? (prep / achieved) * 100 : 0;
+      if (!isEmployeeRow) {
+        return {
+          raw: row,
+          branch: "",
+          employee: "",
+          target: 0,
+          achieved: 0,
+          prep: 0,
+          post: 0,
+          achievementPct: 0,
+          prepPct: 0,
+          postPct: 0,
+          rank: 0,
+          fiveG: 0,
+          fiber: 0,
+        };
+      }
 
-      const postPct = indexMap.postPct >= 0 ? pct(read(indexMap.postPct)) : achieved > 0 ? (post / achieved) * 100 : 0;
+      const achievementPct = totalTarget > 0 ? (achieved / totalTarget) * 100 : 0;
+      const prepPct = achieved > 0 ? (prepaid / achieved) * 100 : 0;
+      const postPct = achieved > 0 ? (postpaid / achieved) * 100 : 0;
 
       return {
         raw: row,
-        branch: cleanText(read(indexMap.branch)),
-        employee: cleanText(read(indexMap.employee)),
-        target,
+        branch: currentBranch || region || "Unknown",
+        employee: name,
+        target: totalTarget,
         achieved,
-        prep,
-        post,
+        prep: prepaid,
+        post: postpaid,
         achievementPct,
         prepPct,
         postPct,
-        rank: toNumber(read(indexMap.rank)),
-        fiveG: toNumber(read(indexMap.fiveG)),
-        fiber: toNumber(read(indexMap.fiber)),
+        rank: 0,
+        fiveG: fiveGHome,
+        fiber: ftth,
       };
     })
-    .filter((row) => row.branch || row.employee || row.target || row.achieved);
-
+    .filter((row) => row.employee);
   const branchMap = new Map<string, Omit<BranchSummary, "achievementPct" | "prepPct" | "postPct">>();
   const employeeRows: DashboardRow[] = [];
 
