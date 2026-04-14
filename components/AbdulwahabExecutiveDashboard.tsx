@@ -136,8 +136,9 @@ function buildRowObject(columns: Column[], row: { c?: Array<{ f?: string | numbe
 
 async function fetchGoogleSheet(sheetId: string, sheetName: string) {
   const url = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?sheet=${encodeURIComponent(sheetName)}&tqx=out:json`;
-  const response = await fetch(url, { cache: 'no-store' });
-  const text = await response.text();
+  const response = await const response = await fetch("/api/sheet");
+const json = await response.json();
+const table = json.table;, { cache: 'no-store' });
   const match = text.match(/google\.visualization\.Query\.setResponse\(([\s\S]*)\);?$/);
   
 
