@@ -138,7 +138,7 @@ async function fetchGoogleSheet(sheetId: string, sheetName: string) {
   const url = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?sheet=${encodeURIComponent(sheetName)}&tqx=out:json`;
   const response = await fetch(url, { cache: 'no-store' });
   const text = await response.text();
-  const match = text.match(/google\.visualization\.Query\.setResponse\((.*)\);?$/s);
+  const match = text.match(/google\.visualization\.Query\.setResponse\(([\s\S]*)\);?$/);
 
   if (!match) {
     throw new Error('Unable to parse Google Sheets response. Ensure the sheet is public as Viewer.');
