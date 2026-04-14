@@ -135,11 +135,24 @@ function buildRowObject(columns: Column[], row: { c?: Array<{ f?: string | numbe
 }
 
 async function fetchGoogleSheet(sheetId: string, sheetName: string) {
-  const url = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?sheet=${encodeURIComponent(sheetName)}&tqx=out:json`;
-  const response = await const response = await fetch("/api/sheet");
-const json = await response.json();
-const table = json.table;, { cache: 'no-store' });
-  const match = text.match(/google\.visualization\.Query\.setResponse\(([\s\S]*)\);?$/);
+  const response = await fetch("/api/sheet");
+
+  if (!response.ok) {
+    throw new Error("Failed to fetch data from API");
+  }
+
+  const json = await response.json();
+
+  if (!json.table) {
+    throw new Error("Invalid data format from Google Sheets");
+  }
+
+  const table = json.table;
+  const columns = table.cols || [];
+  const rows = (table.rows || []).map((row: any) => buildRowObject(columns, row));
+
+  return { columns, rows };
+}
   
 
   if (!match) {
