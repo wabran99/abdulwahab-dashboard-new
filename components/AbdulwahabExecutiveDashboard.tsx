@@ -182,28 +182,27 @@ function transformData(raw: RawSheetData): DashboardData {
 
   const normalizedRows: DashboardRow[] = rows
     .map((row) => {
-      const region = cleanText(row["Region"]);
-      const shopCode = cleanText(row["Shop Code"]);
-      const name = cleanText(row["Name"]);
-      const userName = cleanText(row["UserName"]);
-      const totalTarget = toNumber(row["Total Target"]);
-      const voice = toNumber(row["Voice"]);
-      const mbb = toNumber(row["MBB"]);
-      const ftthTargetOrValue = toNumber(row["FTTH"]);
-      const fiveGHome = toNumber(row["5G Home"]);
-      const achieved = toNumber(row["Achieved"]);
-      const achievedFtth = toNumber(row["FTTH_1"] || row["FTTH"]);
-      const achieved5GHome = toNumber(row["5G Home_1"] || row["5G Home"]);
-      const postpaid = toNumber(row["postpaid"]);
-      const prepaid = toNumber(row["prepaid"]);
+      const values = headers.map((header) => cleanText(row[header]));
+
+      const region = cleanText(values[0]);      // A
+      const shopCode = cleanText(values[1]);    // B
+      const name = cleanText(values[2]);        // C
+      const userName = cleanText(values[3]);    // D
+      const totalTarget = toNumber(values[4]);  // E
+      const achieved = toNumber(values[10]);    // K
+      const postpaid = toNumber(values[15]);    // P
+      const prepaid = toNumber(values[17]);     // R
+
+      const lowerName = name.toLowerCase();
 
       const isBranchHeader =
         !!name &&
         !userName &&
-        !shopCode &&
-        (name.toLowerCase().includes("fbo") ||
-          name.toLowerCase().includes("road") ||
-          name.toLowerCase().includes("mall"));
+        (
+          lowerName.includes("fbo") ||
+          lowerName.includes("road") ||
+          lowerName.includes("mall")
+        );
 
       if (isBranchHeader) {
         currentBranch = name;
@@ -251,7 +250,7 @@ function transformData(raw: RawSheetData): DashboardData {
 
       return {
         raw: row,
-        branch: currentBranch || region || "Unknown",
+        branch: currentBranch || "Unknown",
         employee: name,
         target: totalTarget,
         achieved,
@@ -261,8 +260,8 @@ function transformData(raw: RawSheetData): DashboardData {
         prepPct,
         postPct,
         rank: 0,
-        fiveG: achieved5GHome || fiveGHome,
-        fiber: achievedFtth || ftthTargetOrValue || voice + mbb,
+        fiveG: 0,
+        fiber: 0,
       };
     })
     .filter((row) => row.employee);
